@@ -51,8 +51,6 @@
     }
     .button:hover { background-color: #0088cc; transform: translateY(-2px); }
     .button:active { transform: translateY(0); }
-    .button.secondary { background-color: var(--tertiary-bg); }
-    .button.secondary:hover { background-color: #555566; }
     input[type="text"], input[type="password"], input[type="file"] {
       padding: 10px;
       border: 1px solid var(--tertiary-bg);
@@ -216,13 +214,6 @@
       text-align: center;
       margin-top: 20px;
     }
-    /* Peer Connection Section */
-    .peer-connection-section {
-      margin-top: auto;
-      padding-top: 20px;
-      border-top: 1px solid var(--tertiary-bg);
-    }
-    .peer-connection-section input[type="text"] { margin-bottom: 10px; }
     /* Media Viewer Area */
     #media-viewer-container {
       flex-grow: 1;
@@ -248,10 +239,7 @@
       object-fit: contain;
     }
     #media-viewer-container video,
-    #media-viewer-container audio {
-      width: 100%;
-      outline: none;
-    }
+    #media-viewer-container audio { width: 100%; outline: none; }
     /* === Responsive Design === */
     @media (max-width: 768px) {
       body { font-size: 14px; }
@@ -266,7 +254,6 @@
         overflow-y: auto;
       }
       .file-list-section { flex-grow: 1; min-height: 100px; }
-      .peer-connection-section { margin-top: 10px; padding-top: 10px; }
       #media-viewer-container {
         flex-grow: 1;
         height: 60vh;
@@ -282,16 +269,8 @@
       #file-list li { padding: 8px 12px; }
     }
     @media (max-width: 480px) {
-      header {
-        flex-direction: column;
-        align-items: flex-start;
-        padding-bottom: 10px;
-      }
-      .peer-info {
-        text-align: left;
-        margin-top: 5px;
-        width: 100%;
-      }
+      header { flex-direction: column; align-items: flex-start; padding-bottom: 10px; }
+      .peer-info { text-align: left; margin-top: 5px; width: 100%; }
       #peer-id {
         display: inline-block;
         max-width: 80%;
@@ -346,7 +325,7 @@
     </header>
 
     <main>
-      <!-- Sidebar: Upload, File List, Peer Connection -->
+      <!-- Sidebar: Upload and File List -->
       <aside id="sidebar">
         <!-- File Upload -->
         <section class="upload-section">
@@ -360,16 +339,9 @@
         <section class="file-list-section">
           <h2>Local Files</h2>
           <ul id="file-list">
-            <!-- File items will be added dynamically here -->
+            <!-- File items will be added dynamically -->
           </ul>
           <p id="no-files-message">No files uploaded yet. Upload files to get started!</p>
-        </section>
-        <!-- Peer Connection -->
-        <section class="peer-connection-section">
-          <h2>Connect to Peer</h2>
-          <input type="text" id="peer-connect-id" placeholder="Enter Peer ID" />
-          <button id="connect-button" class="button secondary">Connect</button>
-          <p id="connect-status" style="font-size: 0.9em; margin-top: 5px;"></p>
         </section>
       </aside>
       <!-- Media Viewer -->
@@ -390,9 +362,11 @@
     let db = null;
     let peer = null;
     let currentPeerId = null;
-    let connections = {}; // Active PeerJS data connections: { peerId: connection }
+    let connections = {}; // For host: all connections; for non-host, only the host connection.
     let isSyncingPlayback = false;
     let currentPlayingFileId = null;
+    let isHost = false;
+    let hostConnection = null;
 
     // === DOM Elements ===
     const passwordOverlay = document.getElementById('password-overlay');
@@ -413,9 +387,6 @@
     const noFilesMessage = document.getElementById('no-files-message');
     const mediaViewerContainer = document.getElementById('media-viewer-container');
     const mediaPlaceholder = document.getElementById('media-placeholder');
-    const peerConnectIdInput = document.getElementById('peer-connect-id');
-    const connectButton = document.getElementById('connect-button');
-    const connectStatus = document.getElementById('connect-status');
 
     // === Initialization ===
     document.addEventListener('DOMContentLoaded', () => {
@@ -424,8 +395,6 @@
       passwordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handlePasswordSubmit(); });
       fileInput.addEventListener('change', handleFileUpload);
       peerIdElement.addEventListener('click', copyPeerId);
-      connectButton.addEventListener('click', connectToPeer);
-      peerConnectIdInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') connectToPeer(); });
       fileListElement.addEventListener('click', handleFileListClick);
     });
 
@@ -579,7 +548,6 @@
     }
 
     // === New Helper Functions for File Sync ===
-    // Get all files (full records) from IndexedDB.
     function getAllFilesFromDB() {
       return new Promise((resolve, reject) => {
         if (!db) return reject(new Error("Database not initialized."));
@@ -602,7 +570,6 @@
       });
     }
 
-    // Convert Blob to Base64 data URL.
     function blobToBase64(blob) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -612,7 +579,6 @@
       });
     }
 
-    // Convert Base64 data URL back to Blob.
     function dataURLtoBlob(dataurl) {
       const arr = dataurl.split(',');
       const mime = arr[0].match(/:(.*?);/)[1];
@@ -623,13 +589,11 @@
       return new Blob([u8arr], { type: mime });
     }
 
-    // Store a received file (if it does not already exist) in IndexedDB.
     function storeReceivedFile(name, type, size, blob) {
       return new Promise((resolve, reject) => {
         if (!db) return reject(new Error("Database not initialized."));
         const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
         const store = transaction.objectStore(FILE_STORE_NAME);
-        // Check if a file with the same name exists.
         const index = store.index('name');
         const getRequest = index.get(name);
         getRequest.onsuccess = (event) => {
@@ -657,19 +621,13 @@
       });
     }
 
-    // When a connection is open, send all local files to the peer.
     async function syncLocalFiles(conn) {
       try {
         const files = await getAllFilesFromDB();
         let syncFiles = [];
         for (const file of files) {
           const base64Data = await blobToBase64(file.data);
-          syncFiles.push({
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            data: base64Data
-          });
+          syncFiles.push({ name: file.name, type: file.type, size: file.size, data: base64Data });
         }
         const message = { type: 'syncFiles', files: syncFiles };
         conn.send(JSON.stringify(message));
@@ -700,6 +658,8 @@
           const fileId = await storeFileInDB(file);
           addFileToListUI({ id: fileId, name: file.name, type: file.type });
           noFilesMessage.classList.add('hidden');
+          // If host, broadcast new file; if non-host, send update to host.
+          broadcastMessage({ type: 'playFile', fileId: fileId, fileName: file.name, fileType: file.type });
         } catch (error) {
           console.error(`Failed to store file "${file.name}":`, error);
           filesFailed++;
@@ -831,15 +791,6 @@
         mediaElement.alt = "Image preview";
       }
       if (mediaElement) {
-        const revoke = () => {
-          URL.revokeObjectURL(objectURL);
-          console.log("Revoked Object URL:", objectURL.substring(objectURL.length - 10));
-          if (mediaElement.removeEventListener) {
-            mediaElement.removeEventListener('load', revokeCheck);
-            mediaElement.removeEventListener('error', revokeCheck);
-            mediaElement.removeEventListener('loadeddata', revokeCheck);
-          }
-        };
         const revokeCheck = () => {};
         mediaElement.addEventListener('load', revokeCheck);
         mediaElement.addEventListener('error', revokeCheck);
@@ -871,11 +822,7 @@
       const broadcastPlaybackState = (action, time = null) => {
         if (!isSyncingPlayback) {
           console.log(`Broadcasting playback: ${action} at ${time === null ? 'current time' : time.toFixed(2)}`);
-          const message = {
-            type: 'playback',
-            action: action,
-            time: time === null ? mediaElement.currentTime : time
-          };
+          const message = { type: 'playback', action: action, time: time === null ? mediaElement.currentTime : time };
           broadcastMessage(message);
         }
       };
@@ -898,54 +845,57 @@
       peerSpinnerElement.classList.remove('hidden');
       connectionStatusElement.textContent = "Initializing...";
       connectionStatusElement.className = 'connecting';
-      peer = new Peer(undefined, {});
+      // Try to become host using fixed id "mediahub-room"
+      peer = new Peer("mediahub-room", {});
       peer.on('open', (id) => {
-        currentPeerId = id;
-        console.log('PeerJS initialized. My Peer ID is:', id);
-        peerIdElement.textContent = id;
-        peerIdElement.title = 'Click to copy';
-        connectionStatusElement.textContent = "Waiting";
-        connectionStatusElement.className = 'disconnected';
-        peerSpinnerElement.classList.add('hidden');
+        if (id === "mediahub-room") {
+          isHost = true;
+          console.log("This peer is acting as the host.");
+          currentPeerId = id;
+          peerIdElement.textContent = id;
+          connectionStatusElement.textContent = "Waiting";
+          connectionStatusElement.className = 'disconnected';
+          peerSpinnerElement.classList.add('hidden');
+        } else {
+          // In case a non-host peer gets a different id
+          isHost = false;
+          currentPeerId = id;
+          peerIdElement.textContent = id;
+        }
       });
+      peer.on('error', (err) => {
+        console.error('PeerJS error:', err);
+        if (err.type === 'unavailable') {
+          // Fixed id already in use => this peer is non-host
+          isHost = false;
+          // Create a new peer with a random id
+          peer = new Peer(undefined, {});
+          peer.on('open', (id) => {
+            currentPeerId = id;
+            peerIdElement.textContent = id;
+            // Automatically connect to host with id "mediahub-room"
+            hostConnection = peer.connect("mediahub-room", { reliable: true });
+            setupConnection(hostConnection);
+            connectionStatusElement.textContent = "Connected to host";
+            connectionStatusElement.className = 'connected';
+            peerSpinnerElement.classList.add('hidden');
+          });
+        } else {
+          connectionStatusElement.textContent = `Error (${err.type})`;
+          connectionStatusElement.className = 'disconnected';
+          peerSpinnerElement.classList.add('hidden');
+        }
+      });
+      // Host listens for incoming connections
       peer.on('connection', (conn) => {
         console.log(`Incoming connection from: ${conn.peer}`);
         setupConnection(conn);
       });
-      peer.on('disconnected', () => {
-        console.warn('PeerJS disconnected from signaling server. Attempting to reconnect...');
-        connectionStatusElement.textContent = "Reconnecting...";
-        connectionStatusElement.className = 'connecting';
-        peerSpinnerElement.classList.remove('hidden');
-      });
-      peer.on('close', () => {
-        console.error('PeerJS connection closed permanently.');
-        connectionStatusElement.textContent = "Closed";
-        connectionStatusElement.className = 'disconnected';
-        peerSpinnerElement.classList.add('hidden');
-        connections = {};
-        updatePeerCount();
-      });
-      peer.on('error', (err) => {
-        console.error('PeerJS error:', err);
-        connectionStatusElement.textContent = `Error (${err.type})`;
-        connectionStatusElement.className = 'disconnected';
-        peerSpinnerElement.classList.add('hidden');
-        if (err.type === 'peer-unavailable') {
-          connectStatus.textContent = `Peer ${peerConnectIdInput.value} not found.`;
-          connectStatus.style.color = 'var(--error-color)';
-        } else if (err.type === 'network') {
-          connectStatus.textContent = `Network error. Check connection.`;
-          connectStatus.style.color = 'var(--error-color)';
-        } else {
-          connectStatus.textContent = `Connection error: ${err.type}`;
-          connectStatus.style.color = 'var(--error-color)';
-        }
-        setTimeout(() => { connectStatus.textContent = ''; }, 5000);
-      });
     }
 
     function setupConnection(conn) {
+      // For host, store all incoming connections.
+      // For non-host, hostConnection is set separately.
       if (connections[conn.peer]) {
         console.warn(`Already connected to ${conn.peer}. Rejecting duplicate.`);
         conn.close();
@@ -955,82 +905,58 @@
         console.log(`Connection established with: ${conn.peer}`);
         connections[conn.peer] = conn;
         updatePeerCount();
-        updateConnectionStatus();
-        connectStatus.textContent = `Connected to ${conn.peer}`;
-        connectStatus.style.color = 'var(--success-color)';
-        peerConnectIdInput.value = '';
-        // Send local files to the new peer
-        syncLocalFiles(conn);
+        if (isHost) {
+          // Immediately send all local files to the newly connected peer.
+          syncLocalFiles(conn);
+        }
       });
       conn.on('data', (data) => {
         console.log(`Data received from ${conn.peer}:`, data);
         handleIncomingMessage(data, conn.peer);
+        // If host, relay received message to all other peers.
+        if (isHost) {
+          for (const otherPeerId in connections) {
+            if (otherPeerId !== conn.peer) {
+              const otherConn = connections[otherPeerId];
+              if (otherConn && otherConn.open) {
+                otherConn.send(data);
+              }
+            }
+          }
+        }
       });
       conn.on('close', () => {
         console.log(`Connection closed with: ${conn.peer}`);
         delete connections[conn.peer];
         updatePeerCount();
-        updateConnectionStatus();
       });
       conn.on('error', (err) => {
         console.error(`Connection error with ${conn.peer}:`, err);
         delete connections[conn.peer];
         updatePeerCount();
-        updateConnectionStatus();
-        connectStatus.textContent = `Error with ${conn.peer}: ${err.message}`;
-        connectStatus.style.color = 'var(--error-color)';
       });
     }
 
     function connectToPeer() {
-      const remotePeerId = peerConnectIdInput.value.trim();
-      if (!remotePeerId) {
-        connectStatus.textContent = 'Please enter a Peer ID.';
-        connectStatus.style.color = 'var(--error-color)';
-        return;
-      }
-      if (!peer || peer.destroyed) {
-        connectStatus.textContent = 'PeerJS not initialized or destroyed.';
-        connectStatus.style.color = 'var(--error-color)';
-        return;
-      }
-      if (remotePeerId === currentPeerId) {
-        connectStatus.textContent = 'Cannot connect to yourself.';
-        connectStatus.style.color = 'var(--error-color)';
-        return;
-      }
-      if (connections[remotePeerId]) {
-        connectStatus.textContent = `Already connected to ${remotePeerId}.`;
-        connectStatus.style.color = 'var(--text-muted)';
-        return;
-      }
-      console.log(`Attempting to connect to peer: ${remotePeerId}`);
-      connectStatus.textContent = `Connecting to ${remotePeerId}...`;
-      connectStatus.style.color = 'var(--text-muted)';
-      try {
-        const conn = peer.connect(remotePeerId, { reliable: true });
-        setupConnection(conn);
-      } catch (error) {
-        console.error("Error initiating connection:", error);
-        connectStatus.textContent = `Failed to initiate connection: ${error.message}`;
-        connectStatus.style.color = 'var(--error-color)';
-      }
+      // Manual connection UI is removed; all peers auto-connect.
     }
 
     function broadcastMessage(message) {
-      if (Object.keys(connections).length === 0) return;
-      console.log("Broadcasting message:", message);
       const messageString = JSON.stringify(message);
-      for (const peerId in connections) {
-        const conn = connections[peerId];
-        if (conn && conn.open) {
-          try {
-            conn.send(messageString);
-          } catch (error) {
-            console.error(`Failed to send message to ${peerId}:`, error);
+      if (isHost) {
+        for (const peerId in connections) {
+          const conn = connections[peerId];
+          if (conn && conn.open) {
+            try {
+              conn.send(messageString);
+            } catch (error) {
+              console.error(`Failed to send message to ${peerId}:`, error);
+            }
           }
-        } else {
-          console.warn(`Attempted to send message to non-open connection: ${peerId}`);
+        }
+      } else {
+        if (hostConnection && hostConnection.open) {
+          hostConnection.send(messageString);
         }
       }
     }
@@ -1055,36 +981,6 @@
         case 'playback':
           console.log(`Peer ${senderId} sent playback command: ${message.action} at time ${message.time}`);
           syncPlaybackState(message.action, message.time);
-          break;
-        case 'requestState':
-          console.log(`Peer ${senderId} requested current state.`);
-          if (currentPlayingFileId !== null) {
-            const playingItem = document.querySelector(`#file-list li[data-file-id="${currentPlayingFileId}"]`);
-            if (playingItem) {
-              const response = {
-                type: 'playFile',
-                fileId: currentPlayingFileId,
-                fileName: playingItem.dataset.fileName,
-                fileType: playingItem.dataset.fileType
-              };
-              if (connections[senderId] && connections[senderId].open) {
-                connections[senderId].send(JSON.stringify(response));
-                console.log("Sent current playback state to requester:", response);
-                const mediaElement = mediaViewerContainer.querySelector('video, audio');
-                if (mediaElement) {
-                  const playbackMsg = {
-                    type: 'playback',
-                    action: mediaElement.paused ? 'pause' : 'play',
-                    time: mediaElement.currentTime
-                  };
-                  connections[senderId].send(JSON.stringify(playbackMsg));
-                  console.log("Sent current playback time/state to requester:", playbackMsg);
-                }
-              }
-            }
-          } else {
-            console.log("Nothing currently playing to report state.");
-          }
           break;
         case 'syncFiles':
           if (message.files && Array.isArray(message.files)) {
@@ -1153,18 +1049,6 @@
     function updatePeerCount() {
       const count = Object.keys(connections).length;
       peerCountElement.textContent = count;
-    }
-
-    function updateConnectionStatus() {
-      const count = Object.keys(connections).length;
-      if (count > 0) {
-        connectionStatusElement.textContent = `Connected (${count})`;
-        connectionStatusElement.className = 'connected';
-      } else if (peer && !peer.disconnected) {
-        connectionStatusElement.textContent = "Waiting";
-        connectionStatusElement.className = 'disconnected';
-      }
-      peerSpinnerElement.classList.add('hidden');
     }
 
     function copyPeerId() {
