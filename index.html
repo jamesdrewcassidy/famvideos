@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decentralized Media Hub</title>
+    <!-- Favicon - Minimalist play icon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23333'/><polygon points='35,25 75,50 35,75' fill='%23eee'/></svg>">
+
+    <!-- PeerJS Library for WebRTC -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+    <style>
+        /* === Global Styles & Resets === */
+        :root {
+            --primary-bg: #1a1a1d; /* Very dark grey, almost black */
+            --secondary-bg: #2c2c34; /* Dark grey */
+            --tertiary-bg: #44444f; /* Medium grey */
+            --accent-color: #00aaff; /* Bright blue */
+            --text-color: #e0e0e0; /* Light grey */
+            --text-muted: #a0a0a0; /* Dimmed grey */
+            --success-color: #4caf50;
+            --error-color: #f44336;
+            --border-radius: 8px;
+            --transition-speed: 0.3s;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--primary-bg);
+            color: var(--text-color);
+            font-size: 16px;
+            line-height: 1.6;
+            overflow: hidden; /* Prevent body scroll */
+        }
+
+        /* === Utility Classes === */
+        .hidden { display: none !important; }
+        .text-center { text-align: center; }
+        .error-message { color: var(--error-color); font-size: 0.9em; margin-top: 5px; }
+        .success-message { color: var(--success-color); font-size: 0.9em; margin-top: 5px; }
+        .button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color var(--transition-speed) ease, transform var(--transition-speed) ease;
+            display: inline-block;
+            text-align: center;
+        }
+        .button:hover {
+            background-color: #0088cc; /* Darker blue on hover */
+            transform: translateY(-2px);
+        }
+        .button:active {
+            transform: translateY(0);
+        }
+        .button.secondary {
+             background-color: var(--tertiary-bg);
+        }
+         .button.secondary:hover {
+             background-color: #555566;
+        }
+        input[type="text"], input[type="password"], input[type="file"] {
+            padding: 10px;
+            border: 1px solid var(--tertiary-bg);
+            background-color: var(--secondary-bg);
+            color: var(--text-color);
+            border-radius: var(--border-radius);
+            margin-bottom: 10px;
+            font-size: 1em;
+            width: 100%;
+        }
+        input[type="file"] {
+            cursor: pointer;
+        }
+        /* Style file input button */
+        input[type="file"]::file-selector-button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: background-color var(--transition-speed) ease;
+            margin-right: 10px;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background-color: #0088cc;
+        }
+
+        /* === Password Overlay === */
+        #password-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9); /* Dark overlay */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+        #password-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none; /* Allow interaction with content below after fade */
+        }
+        .password-box {
+            background-color: var(--secondary-bg);
+            padding: 30px 40px;
+            border-radius: var(--border-radius);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        .password-box h2 {
+            margin-bottom: 20px;
+            color: var(--text-color);
+        }
+        .password-box p {
+            color: var(--text-muted);
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+
+        /* === Main Application Layout === */
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh; /* Full viewport height */
+            opacity: 0;
+            transition: opacity 0.5s ease 0.5s; /* Fade in after password */
+        }
+         #app-container.visible {
+            opacity: 1;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--secondary-bg);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0; /* Prevent header from shrinking */
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 100;
+        }
+        header h1 {
+            font-size: 1.5em;
+            color: var(--accent-color);
+            margin: 0;
+        }
+        .peer-info {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            text-align: right;
+        }
+        .peer-info span {
+            display: block;
+            margin-bottom: 2px;
+        }
+        #peer-id {
+            font-weight: bold;
+            color: var(--text-color);
+            cursor: pointer; /* Indicate it's copyable */
+            padding: 2px 4px;
+            background-color: var(--tertiary-bg);
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        #connection-status {
+            font-weight: bold;
+        }
+        #connection-status.connected { color: var(--success-color); }
+        #connection-status.disconnected { color: var(--error-color); }
+        #connection-status.connecting { color: orange; }
+
+        /* Main Content Area */
+        main {
+            display: flex;
+            flex-grow: 1; /* Take remaining vertical space */
+            overflow: hidden; /* Prevent main area scroll, handle scrolling internally */
+            position: relative; /* For potential absolute positioning inside */
+        }
+
+        /* Sidebar (File List & Upload) */
+        #sidebar {
+            width: 300px;
+            background-color: var(--secondary-bg);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto; /* Scrollbar if content overflows */
+            flex-shrink: 0; /* Prevent sidebar shrinking */
+            transition: width var(--transition-speed) ease;
+            border-right: 1px solid var(--tertiary-bg);
+        }
+        #sidebar h2 {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            color: var(--accent-color);
+            border-bottom: 1px solid var(--tertiary-bg);
+            padding-bottom: 10px;
+        }
+
+        /* File Upload Section */
+        .upload-section {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--tertiary-bg);
+        }
+        #upload-progress {
+            width: 100%;
+            height: 8px;
+            appearance: none;
+            background-color: var(--tertiary-bg);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        #upload-progress::-webkit-progress-bar {
+            background-color: var(--tertiary-bg);
+        }
+        #upload-progress::-webkit-progress-value {
+            background-color: var(--success-color);
+            transition: width 0.1s linear;
+        }
+        #upload-progress::-moz-progress-bar {
+            background-color: var(--success-color);
+            transition: width 0.1s linear;
+        }
+
+        /* File List Section */
+        .file-list-section {
+            flex-grow: 1; /* Take remaining space in sidebar */
+            overflow-y: auto; /* Allow scrolling for file list */
+            margin-bottom: 20px;
+        }
+        #file-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #file-list li {
+            background-color: var(--tertiary-bg);
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: background-color var(--transition-speed) ease, transform var(--transition-speed) ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            word-break: break-word; /* Prevent long filenames from overflowing */
+        }
+        #file-list li:hover {
+            background-color: #555566;
+            transform: translateX(3px);
+        }
+        #file-list li.playing {
+            background-color: var(--accent-color);
+            color: white;
+            font-weight: bold;
+        }
+        .file-name {
+            flex-grow: 1;
+            margin-right: 10px; /* Space before delete button */
+        }
+        .file-actions button {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.1em;
+            padding: 5px;
+            transition: color var(--transition-speed) ease;
+        }
+        .file-actions button:hover {
+            color: var(--error-color); /* Red for delete */
+        }
+        #file-list li.playing .file-actions button {
+            color: white; /* Ensure visibility on playing item */
+        }
+        #file-list li.playing .file-actions button:hover {
+            color: #ffdddd; /* Lighter red on playing item */
+        }
+        #no-files-message {
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+
+        /* Peer Connection Section */
+        .peer-connection-section {
+            margin-top: auto; /* Pushes to the bottom */
+            padding-top: 20px;
+            border-top: 1px solid var(--tertiary-bg);
+        }
+        .peer-connection-section input[type="text"] {
+            margin-bottom: 10px;
+        }
+
+
+        /* Media Viewer Area */
+        #media-viewer-container {
+            flex-grow: 1; /* Takes remaining horizontal space */
+            background-color: #000; /* Black background for theater feel */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Hide potential overflow of large media */
+            position: relative; /* For overlay elements if needed */
+        }
+        #media-placeholder {
+            color: var(--text-muted);
+            font-size: 1.5em;
+            text-align: center;
+            padding: 20px;
+        }
+        #media-viewer-container video,
+        #media-viewer-container audio,
+        #media-viewer-container img {
+            max-width: 100%;
+            max-height: 100%;
+            display: block; /* Remove extra space below inline elements */
+            object-fit: contain; /* Scale while preserving aspect ratio */
+        }
+        #media-viewer-container video,
+        #media-viewer-container audio {
+            width: 100%; /* Ensure controls span width for video/audio */
+            outline: none; /* Remove default focus outline */
+        }
+         /* Custom video controls could be added here for more style */
+
+        /* === Responsive Design === */
+        @media (max-width: 768px) {
+            body {
+                font-size: 14px;
+            }
+
+            main {
+                flex-direction: column; /* Stack sidebar and viewer vertically */
+            }
+
+            #sidebar {
+                width: 100%; /* Full width */
+                height: 40vh; /* Fixed height, adjust as needed */
+                max-height: 350px; /* Max height */
+                border-right: none;
+                border-bottom: 1px solid var(--tertiary-bg);
+                flex-shrink: 0; /* Prevent shrinking */
+                overflow-y: auto; /* Ensure sidebar itself is scrollable if content exceeds height */
+            }
+
+            .file-list-section {
+                 flex-grow: 1; /* Allow file list to take available space */
+                 min-height: 100px; /* Ensure it doesn't collapse */
+            }
+
+            .peer-connection-section {
+                 margin-top: 10px; /* Adjust spacing */
+                 padding-top: 10px;
+            }
+
+            #media-viewer-container {
+                flex-grow: 1; /* Take remaining height */
+                height: 60vh; /* Adjust height */
+                 min-height: 200px; /* Ensure minimum viewing space */
+            }
+
+            header {
+                padding: 8px 15px;
+            }
+            header h1 {
+                font-size: 1.2em;
+            }
+            .peer-info {
+                font-size: 0.75em;
+            }
+
+            .password-box {
+                padding: 20px 25px;
+            }
+            .button {
+                padding: 8px 15px;
+                font-size: 0.9em;
+            }
+             input[type="text"], input[type="password"], input[type="file"] {
+                padding: 8px;
+                font-size: 0.9em;
+            }
+            input[type="file"]::file-selector-button {
+                 padding: 6px 10px;
+            }
+
+             #file-list li {
+                 padding: 8px 12px;
+             }
+        }
+
+         @media (max-width: 480px) {
+             header {
+                 flex-direction: column;
+                 align-items: flex-start;
+                 padding-bottom: 10px;
+             }
+             .peer-info {
+                 text-align: left;
+                 margin-top: 5px;
+                 width: 100%; /* Ensure it takes full width */
+             }
+              #peer-id {
+                  display: inline-block; /* Prevent full line break */
+                  max-width: 80%; /* Limit width to prevent overflow */
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  vertical-align: middle;
+              }
+         }
+
+
+        /* === Animations & Transitions === */
+        /* Smooth transitions are added directly to elements like .button, #file-list li, etc. */
+        /* Add subtle loading spinner animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--accent-color);
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Password Protection Overlay -->
+    <div id="password-overlay">
+        <div class="password-box">
+            <h2>Access Decentralized Hub</h2>
+            <p>Enter the password to continue.</p>
+            <input type="password" id="password-input" placeholder="Password">
+            <button id="password-submit" class="button">Unlock</button>
+            <p id="password-error" class="error-message hidden">Incorrect password.</p>
+            <!-- Note: This is basic protection, not cryptographically secure. -->
+        </div>
+    </div>
+
+    <!-- Main Application Container (hidden until password is correct) -->
+    <div id="app-container" class="hidden">
+        <header>
+            <h1>Media Hub</h1>
+            <div class="peer-info">
+                <span>Your Peer ID: <strong id="peer-id" title="Click to copy">Loading...</strong><span id="copy-feedback" class="success-message hidden" style="display: inline; margin-left: 5px;">Copied!</span></span>
+                <span>Status: <strong id="connection-status" class="disconnected">Disconnected</strong><span id="peer-spinner" class="spinner hidden"></span></span>
+                 <span>Connected Peers: <strong id="peer-count">0</strong></span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Sidebar: Upload, File List, Peer Connection -->
+            <aside id="sidebar">
+                <!-- File Upload -->
+                <section class="upload-section">
+                    <h2>Upload Media</h2>
+                    <input type="file" id="file-input" accept="video/*,audio/*,image/*" multiple>
+                     <progress id="upload-progress" value="0" max="100" class="hidden"></progress>
+                    <p id="upload-status" class="success-message hidden"></p>
+                     <p id="upload-error" class="error-message hidden"></p>
+                </section>
+
+                <!-- File List -->
+                <section class="file-list-section">
+                    <h2>Local Files</h2>
+                    <ul id="file-list">
+                        <!-- File items will be added dynamically here -->
+                    </ul>
+                    <p id="no-files-message">No files uploaded yet. Upload files to get started!</p>
+                </section>
+
+                 <!-- Peer Connection -->
+                 <section class="peer-connection-section">
+                     <h2>Connect to Peer</h2>
+                     <input type="text" id="peer-connect-id" placeholder="Enter Peer ID">
+                     <button id="connect-button" class="button secondary">Connect</button>
+                      <p id="connect-status" style="font-size: 0.9em; margin-top: 5px;"></p>
+                 </section>
+            </aside>
+
+            <!-- Media Viewer -->
+            <section id="media-viewer-container">
+                 <div id="media-placeholder">Select a file from the list to play</div>
+                 <!-- Media elements (video, audio, img) will be injected here -->
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // === Configuration ===
+        // WARNING: Hardcoded password for demonstration purposes only.
+        // In a real application, this offers minimal security.
+        const CORRECT_PASSWORD = "password123";
+        const DB_NAME = "decentralizedMediaDB";
+        const DB_VERSION = 1;
+        const FILE_STORE_NAME = "mediaFiles";
+
+        // === Global State ===
+        let db = null; // IndexedDB database instance
+        let peer = null; // PeerJS instance
+        let currentPeerId = null;
+        let connections = {}; // Store active PeerJS data connections { peerId: connection }
+        let isSyncingPlayback = false; // Flag to prevent echo loops during playback sync
+        let currentPlayingFileId = null; // Track the ID of the file currently playing
+
+
+        // === DOM Element References ===
+        const passwordOverlay = document.getElementById('password-overlay');
+        const passwordInput = document.getElementById('password-input');
+        const passwordSubmit = document.getElementById('password-submit');
+        const passwordError = document.getElementById('password-error');
+        const appContainer = document.getElementById('app-container');
+        const peerIdElement = document.getElementById('peer-id');
+        const copyFeedbackElement = document.getElementById('copy-feedback');
+        const connectionStatusElement = document.getElementById('connection-status');
+        const peerSpinnerElement = document.getElementById('peer-spinner');
+        const peerCountElement = document.getElementById('peer-count');
+        const fileInput = document.getElementById('file-input');
+        const uploadProgress = document.getElementById('upload-progress');
+        const uploadStatus = document.getElementById('upload-status');
+        const uploadError = document.getElementById('upload-error');
+        const fileListElement = document.getElementById('file-list');
+        const noFilesMessage = document.getElementById('no-files-message');
+        const mediaViewerContainer = document.getElementById('media-viewer-container');
+        const mediaPlaceholder = document.getElementById('media-placeholder');
+        const peerConnectIdInput = document.getElementById('peer-connect-id');
+        const connectButton = document.getElementById('connect-button');
+        const connectStatus = document.getElementById('connect-status');
+
+
+        // === Initialization ===
+        document.addEventListener('DOMContentLoaded', () => {
+            // Focus password input on load
+            passwordInput.focus();
+
+            // Add event listeners
+            passwordSubmit.addEventListener('click', handlePasswordSubmit);
+            passwordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handlePasswordSubmit();
+            });
+            fileInput.addEventListener('change', handleFileUpload);
+            peerIdElement.addEventListener('click', copyPeerId);
+            connectButton.addEventListener('click', connectToPeer);
+             peerConnectIdInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') connectToPeer();
+            });
+            fileListElement.addEventListener('click', handleFileListClick); // Event delegation for play/delete
+        });
+
+        // === Password Protection ===
+        /**
+         * Handles the submission of the password.
+         * Checks if the entered password is correct and initializes the app if it is.
+         * Otherwise, shows an error message.
+         */
+        function handlePasswordSubmit() {
+            const enteredPassword = passwordInput.value;
+            if (enteredPassword === CORRECT_PASSWORD) {
+                // Fade out password overlay
+                passwordOverlay.classList.add('fade-out');
+                // Show and fade in the main application container
+                appContainer.classList.remove('hidden');
+                setTimeout(() => { // Ensure display:none is removed before adding visible class
+                     appContainer.classList.add('visible');
+                     // Remove overlay from DOM after transition
+                     setTimeout(() => passwordOverlay.remove(), 500);
+                     // Initialize the main application components
+                     initializeApp();
+                }, 10); // Small delay to allow CSS transition
+
+            } else {
+                passwordError.classList.remove('hidden');
+                passwordInput.value = ''; // Clear input
+                passwordInput.focus();
+            }
+        }
+
+        // === Main Application Initialization ===
+        /**
+         * Initializes the core components of the application after password verification.
+         * Sets up IndexedDB, initializes PeerJS, and loads existing files.
+         */
+        async function initializeApp() {
+            console.log("Initializing application...");
+            try {
+                await setupIndexedDB();
+                await loadFilesFromDB();
+                initializePeerJS();
+            } catch (error) {
+                 console.error("Initialization failed:", error);
+                 // Display a critical error message to the user if needed
+                 mediaPlaceholder.textContent = "Error initializing application. Please refresh.";
+                 mediaPlaceholder.style.color = 'var(--error-color)';
+            }
+        }
+
+        // === IndexedDB Operations ===
+        /**
+         * Sets up the IndexedDB database and object store.
+         * @returns {Promise<void>} Resolves when the DB is successfully opened or created.
+         */
+        function setupIndexedDB() {
+            return new Promise((resolve, reject) => {
+                // Check if IndexedDB is supported
+                if (!window.indexedDB) {
+                    console.error("IndexedDB is not supported by this browser.");
+                    uploadError.textContent = "IndexedDB not supported. Cannot store files.";
+                    uploadError.classList.remove('hidden');
+                    return reject(new Error("IndexedDB not supported"));
+                }
+
+                // Request to open the database
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                // Handle errors during DB opening
+                request.onerror = (event) => {
+                    console.error("IndexedDB error:", event.target.error);
+                    reject(new Error(`IndexedDB error: ${event.target.error}`));
+                };
+
+                // Handle successful DB opening
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    console.log("IndexedDB setup complete.");
+                    resolve();
+                };
+
+                // Handle database upgrades (creating object stores)
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+                    console.log("Upgrading IndexedDB...");
+                    // Create the object store if it doesn't exist
+                    if (!db.objectStoreNames.contains(FILE_STORE_NAME)) {
+                        // Use 'id' as the keyPath and enable autoIncrement
+                        const objectStore = db.createObjectStore(FILE_STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                        // Create an index on 'name' for potential future searching (optional)
+                        objectStore.createIndex('name', 'name', { unique: false });
+                        console.log(`Object store "${FILE_STORE_NAME}" created.`);
+                    }
+                     // Note: If you change DB_VERSION, this code runs again,
+                     // allowing schema updates in the future.
+                };
+            });
+        }
+
+        /**
+         * Stores a file (as a Blob) and its metadata in IndexedDB.
+         * @param {File} file - The file object to store.
+         * @returns {Promise<number>} Resolves with the ID of the newly stored file.
+         */
+        function storeFileInDB(file) {
+            return new Promise((resolve, reject) => {
+                if (!db) return reject(new Error("Database not initialized."));
+
+                const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(FILE_STORE_NAME);
+                const fileRecord = {
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    data: file // Store the File object directly (IndexedDB handles Blobs/Files)
+                };
+
+                const request = store.add(fileRecord);
+
+                request.onsuccess = (event) => {
+                    console.log(`File "${file.name}" stored successfully with ID: ${event.target.result}`);
+                    resolve(event.target.result); // Resolve with the new ID
+                };
+
+                request.onerror = (event) => {
+                    console.error(`Error storing file "${file.name}":`, event.target.error);
+                    reject(new Error(`Failed to store file: ${event.target.error}`));
+                };
+            });
+        }
+
+         /**
+         * Retrieves a file Blob from IndexedDB by its ID.
+         * @param {number} id - The ID of the file to retrieve.
+         * @returns {Promise<Blob>} Resolves with the file Blob.
+         */
+         function getFileFromDB(id) {
+             return new Promise((resolve, reject) => {
+                 if (!db) return reject(new Error("Database not initialized."));
+
+                 const transaction = db.transaction([FILE_STORE_NAME], 'readonly');
+                 const store = transaction.objectStore(FILE_STORE_NAME);
+                 const request = store.get(id);
+
+                 request.onsuccess = (event) => {
+                     const record = event.target.result;
+                     if (record && record.data) {
+                         resolve(record.data); // Resolve with the File/Blob object
+                     } else {
+                         reject(new Error(`File with ID ${id} not found.`));
+                     }
+                 };
+
+                 request.onerror = (event) => {
+                     console.error(`Error retrieving file with ID ${id}:`, event.target.error);
+                     reject(new Error(`Failed to retrieve file: ${event.target.error}`));
+                 };
+             });
+         }
+
+         /**
+         * Deletes a file from IndexedDB by its ID.
+         * @param {number} id - The ID of the file to delete.
+         * @returns {Promise<void>} Resolves when the file is successfully deleted.
+         */
+         function deleteFileFromDB(id) {
+             return new Promise((resolve, reject) => {
+                  if (!db) return reject(new Error("Database not initialized."));
+
+                  const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+                  const store = transaction.objectStore(FILE_STORE_NAME);
+                  const request = store.delete(id);
+
+                   request.onsuccess = () => {
+                       console.log(`File with ID ${id} deleted successfully.`);
+                       resolve();
+                   };
+
+                   request.onerror = (event) => {
+                       console.error(`Error deleting file with ID ${id}:`, event.target.error);
+                       reject(new Error(`Failed to delete file: ${event.target.error}`));
+                   };
+             });
+         }
+
+
+        /**
+         * Loads all file metadata from IndexedDB and populates the file list UI.
+         * @returns {Promise<void>} Resolves when the file list is populated.
+         */
+        function loadFilesFromDB() {
+            return new Promise((resolve, reject) => {
+                if (!db) return reject(new Error("Database not initialized."));
+
+                fileListElement.innerHTML = ''; // Clear existing list
+                const transaction = db.transaction([FILE_STORE_NAME], 'readonly');
+                const store = transaction.objectStore(FILE_STORE_NAME);
+                // Use a cursor to iterate over all items efficiently, retrieving only metadata initially
+                const cursorRequest = store.openCursor();
+                let fileFound = false;
+
+                cursorRequest.onsuccess = (event) => {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        fileFound = true;
+                        // Extract necessary info (id, name, type) without loading the large 'data' blob yet
+                        const fileInfo = {
+                             id: cursor.value.id,
+                             name: cursor.value.name,
+                             type: cursor.value.type
+                         };
+                        addFileToListUI(fileInfo);
+                        cursor.continue(); // Move to the next item
+                    } else {
+                         // End of cursor
+                         console.log("Finished loading files from DB.");
+                         noFilesMessage.classList.toggle('hidden', fileFound); // Hide message if files exist
+                         resolve();
+                    }
+                };
+
+                cursorRequest.onerror = (event) => {
+                    console.error("Error loading files:", event.target.error);
+                    noFilesMessage.textContent = "Error loading files.";
+                    noFilesMessage.classList.remove('hidden');
+                    reject(new Error(`Failed to load files: ${event.target.error}`));
+                };
+            });
+        }
+
+
+        // === File Handling ===
+        /**
+         * Handles the selection of files via the file input.
+         * Iterates through selected files, stores them in IndexedDB, and updates the UI.
+         */
+        async function handleFileUpload() {
+            const files = fileInput.files;
+            if (!files.length) return;
+
+            uploadStatus.classList.add('hidden');
+            uploadError.classList.add('hidden');
+            uploadProgress.classList.remove('hidden');
+            uploadProgress.value = 0;
+
+            const totalFiles = files.length;
+            let filesProcessed = 0;
+            let filesFailed = 0;
+
+            // Process files sequentially to avoid overwhelming IndexedDB transactions (optional, parallel might work too)
+            for (const file of files) {
+                try {
+                    // Simple validation (could be more robust)
+                    if (!file.type.match('video.*') && !file.type.match('audio.*') && !file.type.match('image.*')) {
+                         console.warn(`Skipping unsupported file type: ${file.name} (${file.type})`);
+                         filesFailed++;
+                         continue; // Skip this file
+                    }
+
+                    const fileId = await storeFileInDB(file);
+                    // Add to UI immediately after storing
+                     addFileToListUI({ id: fileId, name: file.name, type: file.type });
+                     noFilesMessage.classList.add('hidden'); // Hide the 'no files' message
+
+                } catch (error) {
+                    console.error(`Failed to store file "${file.name}":`, error);
+                    filesFailed++;
+                } finally {
+                    filesProcessed++;
+                    uploadProgress.value = (filesProcessed / totalFiles) * 100;
+                }
+            }
+
+            // Update status message after all files are processed
+            uploadProgress.classList.add('hidden');
+            if (filesFailed === 0) {
+                uploadStatus.textContent = `${totalFiles} file(s) uploaded successfully.`;
+                uploadStatus.classList.remove('hidden');
+            } else {
+                uploadError.textContent = `Processed ${totalFiles} file(s). ${filesProcessed - filesFailed} succeeded, ${filesFailed} failed.`;
+                uploadError.classList.remove('hidden');
+            }
+
+             // Clear the file input to allow re-uploading the same file if needed
+             fileInput.value = '';
+             // Hide status messages after a delay
+             setTimeout(() => {
+                 uploadStatus.classList.add('hidden');
+                 uploadError.classList.add('hidden');
+             }, 5000);
+        }
+
+         /**
+          * Adds a file entry to the UI list.
+          * @param {object} fileInfo - Object containing file id, name, and type.
+          */
+         function addFileToListUI(fileInfo) {
+             const listItem = document.createElement('li');
+             listItem.dataset.fileId = fileInfo.id; // Store ID for later retrieval
+             listItem.dataset.fileName = fileInfo.name; // Store name for display
+             listItem.dataset.fileType = fileInfo.type; // Store type for viewer logic
+
+             // File Name Span
+             const nameSpan = document.createElement('span');
+             nameSpan.classList.add('file-name');
+             nameSpan.textContent = fileInfo.name;
+             listItem.appendChild(nameSpan);
+
+             // Actions Span (Delete Button)
+             const actionsSpan = document.createElement('span');
+             actionsSpan.classList.add('file-actions');
+
+             const deleteButton = document.createElement('button');
+             deleteButton.innerHTML = '×'; // Multiplication sign as delete icon
+             deleteButton.title = 'Delete File';
+             deleteButton.dataset.action = 'delete'; // Identify action on click
+             actionsSpan.appendChild(deleteButton);
+
+             listItem.appendChild(actionsSpan);
+
+             fileListElement.appendChild(listItem);
+         }
+
+        /**
+         * Handles clicks within the file list using event delegation.
+         * Determines if a file item or the delete button was clicked.
+         * @param {Event} event - The click event object.
+         */
+        async function handleFileListClick(event) {
+            const target = event.target;
+            const listItem = target.closest('li[data-file-id]'); // Find the parent list item
+
+            if (!listItem) return; // Clicked outside a file item
+
+            const fileId = parseInt(listItem.dataset.fileId, 10); // Get file ID
+
+            // Check if the delete button was clicked
+            if (target.dataset.action === 'delete') {
+                event.stopPropagation(); // Prevent the click from triggering file playback
+                await deleteFile(fileId, listItem);
+            } else {
+                // Clicked on the file item itself (play action)
+                // Retrieve full file info needed for playback
+                 const fileInfo = {
+                     id: fileId,
+                     name: listItem.dataset.fileName,
+                     type: listItem.dataset.fileType
+                 };
+                 await playFile(fileInfo);
+                 // Broadcast the action to peers
+                 broadcastMessage({ type: 'playFile', fileId: fileId, fileName: fileInfo.name, fileType: fileInfo.type });
+                 updatePlayingIndicator(fileId); // Update local UI immediately
+            }
+        }
+
+        /**
+         * Deletes a file from DB and UI.
+         * @param {number} fileId - The ID of the file to delete.
+         * @param {HTMLElement} listItem - The list item element to remove from UI.
+         */
+        async function deleteFile(fileId, listItem) {
+             if (!confirm(`Are you sure you want to delete "${listItem.dataset.fileName}"?`)) {
+                 return; // User cancelled
+             }
+
+             try {
+                 await deleteFileFromDB(fileId);
+                 listItem.remove(); // Remove from UI
+                 console.log(`File ${fileId} removed from UI.`);
+
+                  // If the deleted file was playing, clear the viewer
+                  if (currentPlayingFileId === fileId) {
+                      clearMediaViewer();
+                      currentPlayingFileId = null;
+                       // Optionally broadcast a clear message? Or let peers timeout/handle missing file?
+                       // For simplicity, we won't broadcast deletion for now. Peers playing it will continue until changed.
+                  }
+
+                  // Check if the list is now empty
+                  if (fileListElement.children.length === 0) {
+                      noFilesMessage.classList.remove('hidden');
+                  }
+             } catch (error) {
+                 console.error(`Failed to delete file ${fileId}:`, error);
+                 alert(`Error deleting file: ${error.message}`); // Inform user
+             }
+        }
+
+
+        // === Media Playback ===
+        /**
+         * Loads and plays the specified file in the media viewer.
+         * @param {object} fileInfo - Object containing file id, name, and type.
+         */
+        async function playFile(fileInfo) {
+            console.log(`Attempting to play file: ID=${fileInfo.id}, Name=${fileInfo.name}, Type=${fileInfo.type}`);
+             clearMediaViewer(false); // Clear previous media, but keep placeholder initially
+
+            try {
+                 // Retrieve the actual file Blob/File object from IndexedDB
+                 const fileBlob = await getFileFromDB(fileInfo.id);
+
+                 // Create an object URL for the blob
+                 // IMPORTANT: Revoke previous object URLs to prevent memory leaks
+                 const mediaElement = setupMediaElement(fileInfo.type, fileBlob);
+
+                 if (mediaElement) {
+                     mediaViewerContainer.innerHTML = ''; // Clear placeholder/previous element fully
+                     mediaViewerContainer.appendChild(mediaElement);
+                     mediaPlaceholder.classList.add('hidden'); // Hide placeholder
+                     currentPlayingFileId = fileInfo.id; // Track currently playing file
+                     console.log(`Now playing: ${fileInfo.name}`);
+                     setupMediaSync(mediaElement); // Add listeners for playback sync
+                     // Note: Autoplay might be blocked by browsers, user interaction (click) should allow it here.
+                     if (mediaElement.play) { // Check if it's video/audio
+                         mediaElement.play().catch(e => console.warn("Autoplay prevented:", e));
+                     }
+                 } else {
+                     console.warn(`Cannot display file type: ${fileInfo.type}`);
+                     mediaPlaceholder.textContent = `Cannot display file type: ${fileInfo.type}`;
+                     mediaPlaceholder.style.color = 'var(--error-color)';
+                      mediaPlaceholder.classList.remove('hidden');
+                     currentPlayingFileId = null;
+                 }
+             } catch (error) {
+                 console.error(`Error playing file ID ${fileInfo.id}:`, error);
+                 mediaPlaceholder.textContent = `Error loading file "${fileInfo.name}". It might have been deleted or corrupted.`;
+                 mediaPlaceholder.style.color = 'var(--error-color)';
+                 mediaPlaceholder.classList.remove('hidden');
+                 currentPlayingFileId = null;
+                 updatePlayingIndicator(null); // Clear any playing indicator
+             }
+        }
+
+        /**
+         * Creates the appropriate HTML media element (video, audio, img) for the file type.
+         * @param {string} fileType - The MIME type of the file.
+         * @param {Blob} fileBlob - The file data blob.
+         * @returns {HTMLMediaElement|HTMLImageElement|null} The created media element or null if unsupported.
+         */
+        function setupMediaElement(fileType, fileBlob) {
+             let mediaElement = null;
+             const objectURL = URL.createObjectURL(fileBlob);
+
+             if (fileType.startsWith('video/')) {
+                 mediaElement = document.createElement('video');
+                 mediaElement.controls = true;
+                 mediaElement.autoplay = true; // Attempt autoplay
+                 mediaElement.src = objectURL;
+             } else if (fileType.startsWith('audio/')) {
+                 mediaElement = document.createElement('audio');
+                 mediaElement.controls = true;
+                 mediaElement.autoplay = true; // Attempt autoplay
+                 mediaElement.src = objectURL;
+             } else if (fileType.startsWith('image/')) {
+                 mediaElement = document.createElement('img');
+                 mediaElement.src = objectURL;
+                 mediaElement.alt = "Image preview";
+             }
+
+             // Add listener to revoke the object URL when the element is removed or src changes
+             // This is crucial for memory management.
+             if (mediaElement) {
+                 const revoke = () => {
+                      URL.revokeObjectURL(objectURL);
+                      console.log("Revoked Object URL:", objectURL.substring(objectURL.length - 10));
+                      // Remove listeners to prevent memory leaks on the element itself
+                      if (mediaElement.removeEventListener) {
+                           mediaElement.removeEventListener('load', revokeCheck);
+                           mediaElement.removeEventListener('error', revokeCheck);
+                           // For video/audio, loadeddata might be more appropriate
+                           mediaElement.removeEventListener('loadeddata', revokeCheck);
+                      }
+                  };
+                  // Revoke when element is no longer needed or page unloads.
+                  // We'll revoke more actively when clearing the viewer.
+                  mediaElement.dataset.objectUrl = objectURL; // Store for explicit revocation later
+
+                  // A simple check to revoke if loading fails or completes (img example)
+                  const revokeCheck = () => { /* Can add logic here if needed, but explicit revoke is better */ };
+                  mediaElement.addEventListener('load', revokeCheck);
+                  mediaElement.addEventListener('error', revokeCheck);
+                  mediaElement.addEventListener('loadeddata', revokeCheck); // For video/audio
+             }
+
+             return mediaElement;
+        }
+
+        /**
+         * Clears the media viewer area, revoking any existing object URLs.
+         * @param {boolean} [showPlaceholder=true] - Whether to show the default placeholder message.
+         */
+        function clearMediaViewer(showPlaceholder = true) {
+             const existingMedia = mediaViewerContainer.querySelector('video, audio, img');
+             if (existingMedia && existingMedia.dataset.objectUrl) {
+                 URL.revokeObjectURL(existingMedia.dataset.objectUrl);
+                 console.log("Revoked Object URL on clear:", existingMedia.dataset.objectUrl.substring(existingMedia.dataset.objectUrl.length - 10));
+             }
+             mediaViewerContainer.innerHTML = ''; // Clear content
+             if (showPlaceholder) {
+                 mediaViewerContainer.appendChild(mediaPlaceholder); // Re-add placeholder
+                 mediaPlaceholder.textContent = "Select a file from the list to play"; // Reset text
+                 mediaPlaceholder.style.color = 'var(--text-muted)';
+                 mediaPlaceholder.classList.remove('hidden');
+             } else {
+                 mediaPlaceholder.classList.add('hidden'); // Ensure placeholder is hidden if not requested
+             }
+             // currentPlayingFileId is typically cleared by the caller (e.g., in deleteFile or playFile error)
+        }
+
+         /**
+          * Adds event listeners to the media element for synchronizing playback state.
+          * @param {HTMLMediaElement} mediaElement - The video or audio element.
+          */
+         function setupMediaSync(mediaElement) {
+             // Check if it's actually a media element with playback controls
+             if (!(mediaElement instanceof HTMLMediaElement)) return;
+
+             const broadcastPlaybackState = (action, time = null) => {
+                  // Only broadcast if the action wasn't triggered by a remote peer
+                 if (!isSyncingPlayback) {
+                     console.log(`Broadcasting playback: ${action} at ${time === null ? 'current time' : time.toFixed(2)}`);
+                      const message = {
+                          type: 'playback',
+                          action: action,
+                          time: time === null ? mediaElement.currentTime : time
+                      };
+                     broadcastMessage(message);
+                 }
+             };
+
+             mediaElement.onplay = () => broadcastPlaybackState('play');
+             mediaElement.onpause = () => broadcastPlaybackState('pause');
+             // Use 'seeking' to capture the start of a seek, 'seeked' for the end. 'seeked' is better for state sync.
+             mediaElement.onseeked = () => broadcastPlaybackState('seek', mediaElement.currentTime);
+
+             // Optional: Sync volume?
+             // mediaElement.onvolumechange = () => broadcastPlaybackState('volume', mediaElement.volume);
+         }
+
+        /**
+         * Updates the visual indicator (e.g., background color) for the currently playing file item.
+         * @param {number|null} playingFileId - The ID of the file now playing, or null to clear.
+         */
+        function updatePlayingIndicator(playingFileId) {
+            document.querySelectorAll('#file-list li').forEach(item => {
+                const itemId = parseInt(item.dataset.fileId, 10);
+                item.classList.toggle('playing', itemId === playingFileId);
+            });
+             currentPlayingFileId = playingFileId; // Ensure global state matches UI
+        }
+
+        // === PeerJS WebRTC Handling ===
+        /**
+         * Initializes the PeerJS connection to the signaling server.
+         * Sets up listeners for incoming connections and peer events.
+         */
+        function initializePeerJS() {
+            console.log("Initializing PeerJS...");
+            peerSpinnerElement.classList.remove('hidden');
+            connectionStatusElement.textContent = "Initializing...";
+            connectionStatusElement.className = 'connecting';
+
+            // Create a Peer instance. Using default PeerServer cloud signaling.
+            // For true decentralization without ANY external server, manual signaling
+            // (e.g., copy/paste SDP) or a local network discovery mechanism (much harder)
+            // would be needed. This uses the free cloud service for feasibility.
+            peer = new Peer(undefined, { // `undefined` lets the server assign an ID
+                 // debug: 2 // Uncomment for verbose PeerJS logging (0=none, 1=errors, 2=warnings+errors, 3=all)
+                 // Optional: Specify STUN/TURN servers for better NAT traversal if needed
+                 // config: {
+                 //     iceServers: [
+                 //         { urls: 'stun:stun.l.google.com:19302' },
+                 //         // Add TURN servers here if available/necessary
+                 //     ]
+                 // }
+            });
+
+            // Event: Peer object is created and connected to the PeerServer
+            peer.on('open', (id) => {
+                currentPeerId = id;
+                console.log('PeerJS initialized. My Peer ID is:', id);
+                peerIdElement.textContent = id;
+                peerIdElement.title = 'Click to copy'; // Reset title after loading
+                connectionStatusElement.textContent = "Waiting";
+                connectionStatusElement.className = 'disconnected'; // Waiting for connections, not connected *to a peer* yet
+                peerSpinnerElement.classList.add('hidden');
+            });
+
+            // Event: Incoming data connection request
+            peer.on('connection', (conn) => {
+                 console.log(`Incoming connection from: ${conn.peer}`);
+                 setupConnection(conn); // Setup listeners for the new connection
+            });
+
+            // Event: Peer disconnected from the PeerServer
+            peer.on('disconnected', () => {
+                console.warn('PeerJS disconnected from signaling server. Attempting to reconnect...');
+                connectionStatusElement.textContent = "Reconnecting...";
+                connectionStatusElement.className = 'connecting';
+                peerSpinnerElement.classList.remove('hidden');
+                 // PeerJS attempts to reconnect automatically. Handle potential permanent failure.
+                 // peer.reconnect(); // Manually trigger reconnect if needed
+            });
+
+            // Event: Peer closed connection
+            peer.on('close', () => {
+                console.error('PeerJS connection closed permanently.');
+                connectionStatusElement.textContent = "Closed";
+                connectionStatusElement.className = 'disconnected';
+                peerSpinnerElement.classList.add('hidden');
+                 connections = {}; // Clear all connections
+                 updatePeerCount();
+                 // Maybe disable connection input/button here
+            });
+
+             // Event: PeerJS Error
+             peer.on('error', (err) => {
+                 console.error('PeerJS error:', err);
+                 connectionStatusElement.textContent = `Error (${err.type})`;
+                 connectionStatusElement.className = 'disconnected'; // Treat errors as disconnected state
+                 peerSpinnerElement.classList.add('hidden');
+
+                  // Handle specific errors, e.g., invalid ID, server errors
+                  if (err.type === 'peer-unavailable') {
+                      connectStatus.textContent = `Peer ${peerConnectIdInput.value} not found.`;
+                      connectStatus.style.color = 'var(--error-color)';
+                  } else if (err.type === 'network') {
+                       connectStatus.textContent = `Network error. Check connection.`;
+                       connectStatus.style.color = 'var(--error-color)';
+                  } else {
+                       connectStatus.textContent = `Connection error: ${err.type}`;
+                       connectStatus.style.color = 'var(--error-color)';
+                  }
+                  // Clear status after a delay
+                 setTimeout(() => { connectStatus.textContent = ''; }, 5000);
+             });
+        }
+
+        /**
+         * Sets up event listeners for a PeerJS DataConnection.
+         * @param {PeerJS.DataConnection} conn - The PeerJS data connection object.
+         */
+        function setupConnection(conn) {
+             // Reject connection if already connected to this peer
+             if (connections[conn.peer]) {
+                 console.warn(`Already connected to ${conn.peer}. Rejecting duplicate.`);
+                 conn.close();
+                 return;
+             }
+
+             conn.on('open', () => {
+                 console.log(`Connection established with: ${conn.peer}`);
+                 connections[conn.peer] = conn; // Store the active connection
+                 updatePeerCount();
+                 updateConnectionStatus();
+                 connectStatus.textContent = `Connected to ${conn.peer}`;
+                 connectStatus.style.color = 'var(--success-color)';
+                 peerConnectIdInput.value = ''; // Clear input on successful connection
+
+                  // Optionally, send a handshake or request current state upon connection
+                  // Example: Request what the other peer is currently playing
+                 // conn.send({ type: 'requestState' });
+             });
+
+             // Event: Received data from the peer
+             conn.on('data', (data) => {
+                 console.log(`Data received from ${conn.peer}:`, data);
+                 handleIncomingMessage(data, conn.peer);
+             });
+
+             // Event: Connection closed
+             conn.on('close', () => {
+                 console.log(`Connection closed with: ${conn.peer}`);
+                 delete connections[conn.peer]; // Remove the connection
+                 updatePeerCount();
+                 updateConnectionStatus();
+                  // Show status only if it wasn't us initiating the close
+                  // (Hard to determine reliably without more state)
+                  // connectStatus.textContent = `Disconnected from ${conn.peer}`;
+                  // connectStatus.style.color = 'var(--text-muted)';
+             });
+
+             // Event: Error on the connection
+             conn.on('error', (err) => {
+                 console.error(`Connection error with ${conn.peer}:`, err);
+                 delete connections[conn.peer]; // Assume connection is lost on error
+                 updatePeerCount();
+                 updateConnectionStatus();
+                 connectStatus.textContent = `Error with ${conn.peer}: ${err.message}`;
+                 connectStatus.style.color = 'var(--error-color)';
+             });
+        }
+
+        /**
+         * Attempts to establish a connection to another peer using their ID.
+         */
+        function connectToPeer() {
+            const remotePeerId = peerConnectIdInput.value.trim();
+            if (!remotePeerId) {
+                connectStatus.textContent = 'Please enter a Peer ID.';
+                connectStatus.style.color = 'var(--error-color)';
+                return;
+            }
+            if (!peer || peer.destroyed) {
+                 connectStatus.textContent = 'PeerJS not initialized or destroyed.';
+                 connectStatus.style.color = 'var(--error-color)';
+                 return;
+            }
+             if (remotePeerId === currentPeerId) {
+                 connectStatus.textContent = 'Cannot connect to yourself.';
+                 connectStatus.style.color = 'var(--error-color)';
+                 return;
+             }
+             if (connections[remotePeerId]) {
+                 connectStatus.textContent = `Already connected to ${remotePeerId}.`;
+                 connectStatus.style.color = 'var(--text-muted)';
+                 return;
+             }
+
+
+            console.log(`Attempting to connect to peer: ${remotePeerId}`);
+            connectStatus.textContent = `Connecting to ${remotePeerId}...`;
+            connectStatus.style.color = 'var(--text-muted)';
+
+            try {
+                 const conn = peer.connect(remotePeerId, {
+                     reliable: true // Use reliable SCTP data channel if available
+                 });
+                 setupConnection(conn); // Setup listeners for the outgoing connection attempt
+             } catch (error) {
+                 console.error("Error initiating connection:", error);
+                 connectStatus.textContent = `Failed to initiate connection: ${error.message}`;
+                 connectStatus.style.color = 'var(--error-color)';
+             }
+        }
+
+        /**
+         * Broadcasts a message (JSON object) to all connected peers.
+         * @param {object} message - The data object to send.
+         */
+        function broadcastMessage(message) {
+            if (Object.keys(connections).length === 0) {
+                 // console.log("No peers connected, message not sent:", message);
+                 return; // No one to send to
+            }
+
+             console.log("Broadcasting message:", message);
+             const messageString = JSON.stringify(message); // Stringify once for efficiency
+
+             for (const peerId in connections) {
+                 const conn = connections[peerId];
+                 if (conn && conn.open) {
+                      try {
+                           conn.send(messageString); // PeerJS handles serialization
+                      } catch (error) {
+                           console.error(`Failed to send message to ${peerId}:`, error);
+                           // Optionally handle queueing or error state for this peer
+                      }
+                 } else {
+                      console.warn(`Attempted to send message to non-open connection: ${peerId}`);
+                 }
+             }
+        }
+
+        /**
+         * Handles incoming messages received from peers.
+         * Parses the message and triggers appropriate actions (e.g., play file, sync playback).
+         * @param {string|object} data - The received data (PeerJS might parse JSON automatically).
+         * @param {string} senderId - The Peer ID of the sender.
+         */
+        async function handleIncomingMessage(data, senderId) {
+            let message;
+            try {
+                // PeerJS might auto-parse JSON, but handle cases where it doesn't
+                 message = (typeof data === 'string') ? JSON.parse(data) : data;
+                if (typeof message !== 'object' || message === null) throw new Error("Invalid message format");
+            } catch (error) {
+                 console.error(`Failed to parse message from ${senderId}:`, error, "Data:", data);
+                 return;
+            }
+
+             console.log(`Processing message type "${message.type}" from ${senderId}`);
+
+             // Prevent processing actions triggered by self via broadcast echo (though PeerJS shouldn't echo)
+             // if (senderId === currentPeerId) return;
+
+             switch (message.type) {
+                 case 'playFile':
+                     // A peer requested to play a specific file
+                     console.log(`Peer ${senderId} requested playback of file ID: ${message.fileId}, Name: ${message.fileName}`);
+                      // Check if we have this file locally by ID
+                      const fileInfo = { id: message.fileId, name: message.fileName, type: message.fileType };
+                      // We need to check if the file *exists* before playing.
+                      // A simple check could involve querying IDB, but playFile already does this.
+                      // Let's just try to play it. playFile handles errors if not found.
+                      await playFile(fileInfo);
+                     updatePlayingIndicator(message.fileId); // Update UI to reflect remote command
+                     break;
+
+                 case 'playback':
+                     // A peer sent a playback control command (play, pause, seek)
+                      console.log(`Peer ${senderId} sent playback command: ${message.action} at time ${message.time}`);
+                     syncPlaybackState(message.action, message.time);
+                     break;
+
+                 case 'requestState':
+                      // A peer connected and is asking for the current state
+                      console.log(`Peer ${senderId} requested current state.`);
+                      if (currentPlayingFileId !== null) {
+                           // Find the file info to send back
+                           const playingItem = document.querySelector(`#file-list li[data-file-id="${currentPlayingFileId}"]`);
+                           if (playingItem) {
+                                const response = {
+                                    type: 'playFile',
+                                    fileId: currentPlayingFileId,
+                                    fileName: playingItem.dataset.fileName,
+                                    fileType: playingItem.dataset.fileType
+                                };
+                                // Send directly back to the requester
+                                if (connections[senderId] && connections[senderId].open) {
+                                    connections[senderId].send(JSON.stringify(response));
+                                    console.log("Sent current playback state to requester:", response);
+
+                                     // Also send current playback position if playing/paused
+                                     const mediaElement = mediaViewerContainer.querySelector('video, audio');
+                                     if (mediaElement) {
+                                          const playbackMsg = {
+                                              type: 'playback',
+                                              action: mediaElement.paused ? 'pause' : 'play',
+                                              time: mediaElement.currentTime
+                                          };
+                                          connections[senderId].send(JSON.stringify(playbackMsg));
+                                           console.log("Sent current playback time/state to requester:", playbackMsg);
+                                     }
+
+                                }
+                           }
+                      } else {
+                          // Optionally send a "nothing playing" message
+                          console.log("Nothing currently playing to report state.");
+                      }
+                     break;
+
+                 default:
+                     console.warn(`Received unknown message type "${message.type}" from ${senderId}`);
+             }
+        }
+
+         /**
+          * Applies a received playback command (play, pause, seek) to the local media element.
+          * Uses a flag `isSyncingPlayback` to prevent broadcasting actions that were just received.
+          * @param {string} action - The action ('play', 'pause', 'seek').
+          * @param {number} time - The timestamp associated with the action (especially for seek).
+          */
+         function syncPlaybackState(action, time) {
+             const mediaElement = mediaViewerContainer.querySelector('video, audio');
+             if (!mediaElement) {
+                 console.warn("Cannot sync playback: No media element found.");
+                 return;
+             }
+
+             isSyncingPlayback = true; // Set flag to prevent echo broadcast
+
+             try {
+                 switch (action) {
+                     case 'play':
+                         // Only play if currently paused and time is reasonably close (avoid glitches)
+                          if (mediaElement.paused) {
+                              console.log(`Sync: Playing media.`);
+                              // Apply seek first if needed, then play
+                              if (Math.abs(mediaElement.currentTime - time) > 1.0) { // Allow 1s discrepancy
+                                   console.log(`Sync: Seeking to ${time.toFixed(2)} before playing.`);
+                                   mediaElement.currentTime = time;
+                              }
+                               mediaElement.play().catch(e => console.warn("Sync: Playback failed:", e));
+                          } else {
+                               // Already playing, maybe just sync time if needed
+                               if (Math.abs(mediaElement.currentTime - time) > 1.0) {
+                                   console.log(`Sync: Adjusting time while playing to ${time.toFixed(2)}.`);
+                                   mediaElement.currentTime = time;
+                               }
+                          }
+                         break;
+                     case 'pause':
+                          // Only pause if currently playing
+                          if (!mediaElement.paused) {
+                               console.log(`Sync: Pausing media.`);
+                               mediaElement.pause();
+                          }
+                          // Always sync time when pausing? Helps resync on next play.
+                           if (Math.abs(mediaElement.currentTime - time) > 0.2) { // Smaller threshold when paused
+                               console.log(`Sync: Setting paused time to ${time.toFixed(2)}.`);
+                               mediaElement.currentTime = time;
+                           }
+                         break;
+                     case 'seek':
+                         // Apply seek if the time difference is significant
+                         if (Math.abs(mediaElement.currentTime - time) > 1.0) { // Allow 1s discrepancy
+                              console.log(`Sync: Seeking to ${time.toFixed(2)}.`);
+                              mediaElement.currentTime = time;
+                          } else {
+                                console.log(`Sync: Seek command received for ${time.toFixed(2)}, but current time ${mediaElement.currentTime.toFixed(2)} is close enough. Ignoring.`);
+                          }
+                         break;
+                     // case 'volume': // Example if volume sync was added
+                     //     if (mediaElement.volume !== time) { // Here 'time' would be volume level
+                     //         mediaElement.volume = time;
+                     //     }
+                     //     break;
+                 }
+             } catch (error) {
+                 console.error("Error applying synced playback state:", error);
+             } finally {
+                 // IMPORTANT: Reset the flag after a short delay to allow the event handlers to finish
+                 // without immediately re-broadcasting the action we just performed.
+                 setTimeout(() => { isSyncingPlayback = false; }, 100); // Adjust delay if needed
+             }
+         }
+
+
+        // === UI Updates & Helpers ===
+        /**
+         * Updates the peer count display.
+         */
+        function updatePeerCount() {
+            const count = Object.keys(connections).length;
+            peerCountElement.textContent = count;
+        }
+
+         /**
+          * Updates the overall connection status indicator based on active connections.
+          */
+         function updateConnectionStatus() {
+             const count = Object.keys(connections).length;
+             if (count > 0) {
+                 connectionStatusElement.textContent = `Connected (${count})`;
+                 connectionStatusElement.className = 'connected';
+             } else if (peer && !peer.disconnected) {
+                  // Connected to signaling server, but no peers
+                 connectionStatusElement.textContent = "Waiting";
+                 connectionStatusElement.className = 'disconnected'; // Visually indicate no active P2P connection
+             } else {
+                  // Disconnected from signaling or error state handled by PeerJS listeners
+             }
+             peerSpinnerElement.classList.add('hidden'); // Hide spinner once status is determined
+         }
+
+        /**
+         * Copies the current Peer ID to the clipboard.
+         */
+        function copyPeerId() {
+            if (!currentPeerId) return;
+
+             navigator.clipboard.writeText(currentPeerId).then(() => {
+                 console.log('Peer ID copied to clipboard');
+                 copyFeedbackElement.classList.remove('hidden');
+                 setTimeout(() => {
+                     copyFeedbackElement.classList.add('hidden');
+                 }, 1500); // Hide feedback message after 1.5 seconds
+             }).catch(err => {
+                 console.error('Failed to copy Peer ID: ', err);
+                 // Provide fallback for older browsers or insecure contexts if needed
+                 alert(`Could not copy ID automatically. Your ID is: ${currentPeerId}`);
+             });
+        }
+
+    </script>
+</body>
+</html>
